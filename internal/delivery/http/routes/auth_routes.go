@@ -12,10 +12,11 @@ func SetupAuthRoutes(
 	authHandler *handler.AuthHandler,
 	authMiddleware *middleware.AuthMiddleware,
 ) {
-	// 공개 라우트
-	router.HandleFunc("/api/auth/register", authHandler.Register).Methods("POST")
-	router.HandleFunc("/api/auth/login", authHandler.Login).Methods("POST")
+	// 내부 서비스 간 API (User Service에서 호출)
+	router.HandleFunc("/api/auth/token", authHandler.CreateToken).Methods("POST")
+	router.HandleFunc("/api/auth/token/validate", authHandler.ValidateToken).Methods("GET")
 
-	// 인증이 필요한 라우트
-	router.HandleFunc("/api/auth/logout", authMiddleware.Authenticate(authHandler.Logout)).Methods("POST")
+	// 클라이언트 API
+	router.HandleFunc("/api/auth/token/refresh", authHandler.RefreshToken).Methods("POST")
+	router.HandleFunc("/api/auth/token/revoke", authMiddleware.Authenticate(authHandler.RevokeToken)).Methods("POST")
 }

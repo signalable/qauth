@@ -10,7 +10,6 @@ import (
 
 type Config struct {
 	Server   ServerConfig
-	MongoDB  MongoDBConfig
 	Redis    RedisConfig
 	JWT      JWTConfig
 	LogLevel string
@@ -19,11 +18,6 @@ type Config struct {
 type ServerConfig struct {
 	Host string
 	Port string
-}
-
-type MongoDBConfig struct {
-	URI      string
-	Database string
 }
 
 type RedisConfig struct {
@@ -50,7 +44,7 @@ func LoadConfig() (*Config, error) {
 		redisDB = 0
 	}
 
-	// JWT 만료 시간 파싱
+	// JWT 만료 시간 파싱 (시간 단위)
 	jwtExpirationHours, err := strconv.Atoi(getEnv("JWT_EXPIRATION_HOURS", "24"))
 	if err != nil {
 		jwtExpirationHours = 24
@@ -60,10 +54,6 @@ func LoadConfig() (*Config, error) {
 		Server: ServerConfig{
 			Host: getEnv("SERVER_HOST", "0.0.0.0"),
 			Port: getEnv("SERVER_PORT", "8080"),
-		},
-		MongoDB: MongoDBConfig{
-			URI:      getEnv("MONGODB_URI", "mongodb://localhost:27017"),
-			Database: getEnv("MONGODB_DATABASE", "auth_db"),
 		},
 		Redis: RedisConfig{
 			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),

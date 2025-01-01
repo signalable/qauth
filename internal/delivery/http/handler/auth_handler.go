@@ -3,8 +3,8 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
-	"github.com/signalable/qauth/internal/domain"
 	"github.com/signalable/qauth/internal/usecase"
 )
 
@@ -19,46 +19,17 @@ func NewAuthHandler(authUseCase usecase.AuthUseCase) *AuthHandler {
 	}
 }
 
-// Register 회원가입 핸들러
-func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
-	var req domain.RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "잘못된 요청 형식입니다", http.StatusBadRequest)
+// CreateToken 토큰 생성 핸들러
+func (h *AuthHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID") // User Service에서 전달받은 사용자 ID
+	if userID == "" {
+		http.Error(w, "사용자 ID가 필요합니다", http.StatusBadRequest)
 		return
 	}
 
-	if err := h.authUseCase.Register(r.Context(), &req); err != nil {
-		switch err {
-		case domain.ErrEmailAlreadyExists:
-			http.Error(w, err.Error(), http.StatusConflict)
-		default:
-			http.Error(w, "내부 서버 오류", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "회원가입이 완료되었습니다",
-	})
-}
-
-// Login 로그인 핸들러
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	var req domain.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "잘못된 요청 형식입니다", http.StatusBadRequest)
-		return
-	}
-
-	resp, err := h.authUseCase.Login(r.Context(), &req)
+	resp, err := h.authUseCase.CreateToken(r.Context(), userID)
 	if err != nil {
-		switch err {
-		case domain.ErrInvalidCredentials:
-			http.Error(w, err.Error(), http.StatusUnauthorized)
-		default:
-			http.Error(w, "내부 서버 오류", http.StatusInternalServerError)
-		}
+		http.Error(w, "토큰 생성 실패", http.StatusInternalServerError)
 		return
 	}
 
@@ -66,24 +37,66 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// Logout 로그아웃 핸들러
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("Authorization")
+// ValidateToken 토큰 검증 핸들러
+func (h *AuthHandler) ValidateToken(w http.ResponseWriter, r *http.Request) {
+	token := extractToken(r)
 	if token == "" {
-		http.Error(w, "토큰이 없습니다", http.StatusUnauthorized)
+		http.Error(w, "토큰이 필요합니다", http.StatusBadRequest)
 		return
 	}
 
-	// "Bearer " 접두사 제거
-	tokenString := token[7:]
+	resp, err := h.authUseCase.ValidateToken(r.Context(), token)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 
-	if err := h.authUseCase.RevokeToken(r.Context(), tokenString); err != nil {
-		http.Error(w, "로그아웃 처리 중 오류가 발생했습니다", http.StatusInternalServerError)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// RevokeToken 토큰 폐기 핸들러
+func (h *AuthHandler) RevokeToken(w http.ResponseWriter, r *http.Request) {
+	token := extractToken(r)
+	if token == "" {
+		http.Error(w, "토큰이 필요합니다", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.authUseCase.RevokeToken(r.Context(), token); err != nil {
+		http.Error(w, "토큰 폐기 실패", http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"message": "로그아웃되었습니다",
+		"message": "토큰이 폐기되었습니다",
 	})
+}
+
+// RefreshToken 토큰 새로고침 핸들러
+func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	token := extractToken(r)
+	if token == "" {
+		http.Error(w, "토큰이 필요합니다", http.StatusBadRequest)
+		return
+	}
+
+	resp, err := h.authUseCase.RefreshToken(r.Context(), token)
+	if err != nil {
+		http.Error(w, "토큰 새로고침 실패", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// extractToken 요청에서 토큰 추출
+func extractToken(r *http.Request) string {
+	bearerToken := r.Header.Get("Authorization")
+	if len(strings.Split(bearerToken, " ")) == 2 {
+		return strings.Split(bearerToken, " ")[1]
+	}
+	return ""
 }

@@ -9,14 +9,11 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/mux"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/signalable/qauth/internal/config"
 	"github.com/signalable/qauth/internal/delivery/http/handler"
 	"github.com/signalable/qauth/internal/delivery/http/middleware"
 	"github.com/signalable/qauth/internal/delivery/http/routes"
-	"github.com/signalable/qauth/internal/repository/mongodb"
 	redisRepository "github.com/signalable/qauth/internal/repository/redis"
 	"github.com/signalable/qauth/internal/usecase"
 	"github.com/signalable/qauth/pkg/jwt"
@@ -29,21 +26,6 @@ func main() {
 		log.Fatalf("설정을 로드할 수 없습니다: %v", err)
 	}
 
-	// MongoDB 연결
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(cfg.MongoDB.URI))
-	if err != nil {
-		log.Fatalf("MongoDB 연결 실패: %v", err)
-	}
-	defer mongoClient.Disconnect(ctx)
-
-	// MongoDB 연결 테스트
-	if err := mongoClient.Ping(ctx, nil); err != nil {
-		log.Fatalf("MongoDB 연결 테스트 실패: %v", err)
-	}
-
 	// Redis 연결
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     cfg.Redis.Addr,
@@ -52,19 +34,21 @@ func main() {
 	})
 
 	// Redis 연결 테스트
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	if _, err := redisClient.Ping(ctx).Result(); err != nil {
 		log.Fatalf("Redis 연결 실패: %v", err)
 	}
 
-	// 레포지토리 초기화
-	userRepo := mongodb.NewUserRepository(mongoClient.Database(cfg.MongoDB.Database))
-	tokenRepo := redisRepository.NewTokenRepository(redisClient)
-
 	// JWT 서비스 초기화
 	jwtService := jwt.NewJWTService(cfg.JWT.SecretKey)
 
+	// 레포지토리 초기화
+	tokenRepo := redisRepository.NewTokenRepository(redisClient)
+
 	// 유스케이스 초기화
-	authUseCase := usecase.NewAuthUseCase(userRepo, tokenRepo, jwtService)
+	authUseCase := usecase.NewAuthUseCase(tokenRepo, jwtService)
 
 	// 핸들러 및 미들웨어 초기화
 	authHandler := handler.NewAuthHandler(authUseCase)
@@ -74,9 +58,25 @@ func main() {
 	router := mux.NewRouter()
 	routes.SetupAuthRoutes(router, authHandler, authMiddleware)
 
+	// CORS 미들웨어 설정
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	// 서버 시작
 	serverAddr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("서버 시작: %s", serverAddr)
+	log.Printf("Auth Service 시작: %s", serverAddr)
 
 	server := &http.Server{
 		Addr:         serverAddr,
