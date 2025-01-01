@@ -4,49 +4,54 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/signalable/qauth/internal/domain"
+	"github.com/signalable/qauth/pkg/jwt"
 )
 
 type tokenRepository struct {
-	client *redis.Client
+	client     *redis.Client
+	jwtService *jwt.Service
 }
 
 // NewTokenRepository Redis 토큰 레포지토리 생성자
-func NewTokenRepository(client *redis.Client) *tokenRepository {
+func NewTokenRepository(client *redis.Client, jwtService *jwt.Service) *tokenRepository {
 	return &tokenRepository{
-		client: client,
+		client:     client,
+		jwtService: jwtService,
 	}
 }
 
 // Store 토큰 저장
 func (r *tokenRepository) Store(ctx context.Context, userID string, metadata *domain.TokenMetadata) error {
-	// 토큰 메타데이터를 JSON으로 직렬화
 	data, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("토큰 메타데이터 직렬화 실패: %w", err)
 	}
 
-	// 토큰 저장
+	// userID를 키로 사용
+	key := fmt.Sprintf("user:%s:token", userID)
 	duration := time.Until(time.Unix(metadata.ExpiresAt, 0))
-	if err := r.client.Set(ctx, metadata.UserID, data, duration).Err(); err != nil {
-		return fmt.Errorf("토큰 저장 실패: %w", err)
-	}
 
-	// 사용자 ID와 토큰 매핑 저장
-	if err := r.client.SAdd(ctx, fmt.Sprintf("user:%s:tokens", userID), metadata.UserID).Err(); err != nil {
-		return fmt.Errorf("토큰 매핑 저장 실패: %w", err)
-	}
-
-	return nil
+	return r.client.Set(ctx, key, data, duration).Err()
 }
 
 // Validate 토큰 검증
 func (r *tokenRepository) Validate(ctx context.Context, token string) (*domain.TokenMetadata, error) {
+	// Redis에서 토큰 조회 전 로깅 추가
+	log.Printf("Validating token in Redis: %s", token)
+
+	// JWT에서 userID를 추출
+	userID, err := r.jwtService.ValidateToken(token)
+	if err != nil {
+		return nil, err
+	}
+
 	// 토큰 메타데이터 조회
-	data, err := r.client.Get(ctx, token).Bytes()
+	data, err := r.client.Get(ctx, fmt.Sprintf("user:%s:token", userID)).Bytes()
 	if err == redis.Nil {
 		return nil, domain.ErrInvalidToken
 	}

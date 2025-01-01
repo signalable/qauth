@@ -45,7 +45,7 @@ func main() {
 	jwtService := jwt.NewJWTService(cfg.JWT.SecretKey)
 
 	// 레포지토리 초기화
-	tokenRepo := redisRepository.NewTokenRepository(redisClient)
+	tokenRepo := redisRepository.NewTokenRepository(redisClient, jwtService)
 
 	// 유스케이스 초기화
 	authUseCase := usecase.NewAuthUseCase(tokenRepo, jwtService)

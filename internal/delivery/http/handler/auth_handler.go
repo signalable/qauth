@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -45,8 +46,12 @@ func (h *AuthHandler) ValidateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 디버깅을 위한 로그 추가
+	log.Printf("Received token for validation: %s", token)
+
 	resp, err := h.authUseCase.ValidateToken(r.Context(), token)
 	if err != nil {
+		log.Printf("Token validation error: %v", err) // 에러 로깅 추가
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}

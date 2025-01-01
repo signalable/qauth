@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -37,11 +38,15 @@ func (s *Service) GenerateToken(userID string) (string, error) {
 func (s *Service) ValidateToken(tokenString string) (string, error) {
 	// 토큰 파싱 및 검증
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// 알고리즘 검증 추가
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return s.secretKey, nil
 	})
 
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("token parsing error: %w", err)
 	}
 
 	if !token.Valid {
@@ -52,6 +57,13 @@ func (s *Service) ValidateToken(tokenString string) (string, error) {
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return "", jwt.ErrInvalidKeyType
+	}
+
+	// 만료 시간 검증 추가
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().Unix() > int64(exp) {
+			return "", fmt.Errorf("token is expired")
+		}
 	}
 
 	userID, ok := claims["user_id"].(string)
